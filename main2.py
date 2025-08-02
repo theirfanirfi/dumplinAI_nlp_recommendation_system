@@ -1,6 +1,5 @@
 from data.preprocessor import DataPreprocessor
 from services.recommendation_service import RecommendationService
-from config.settings import Config
 
 def preprocess_data():
     """Run data preprocessing pipeline"""
