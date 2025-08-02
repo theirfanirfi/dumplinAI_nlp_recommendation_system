@@ -1,6 +1,7 @@
 import os
 
 class Config:
+    ROOT = "/content/drive/MyDrive/Projects/ai/dumplin"
 
     # Classification labels
     MOOD_LABELS = ['lowkey', 'nightout', 'comforting', 'surprise', 'hidden gem']

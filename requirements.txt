@@ -1,1 +1,5 @@
 geopandas
+pandas
+openai
+re
+transformers

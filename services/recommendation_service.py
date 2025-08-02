@@ -3,6 +3,7 @@ from services.mood_classifier import MoodClassifier
 from services.geo_service import GeoService
 from data.loader import DatasetLoader
 from config.settings import Config
+import pandas as pd
 
 class RecommendationService:
     def __init__(self, datasets=None):
@@ -16,6 +17,8 @@ class RecommendationService:
         self.city_picker_dictionary = None
         self.posts_dictionary = None
         self.compiled_prompt = None
+        self.filtered_places = None
+        self.filtered_posts = None
         
         # OpenAI client
         openai.api_key = Config.OPENAI_API_KEY
@@ -39,35 +42,45 @@ class RecommendationService:
     def get_places_in_boundaries(self):
         """Get places within city boundaries and matching user mood"""
         all_places = self.datasets.get_places()
+        places_by_user_city = all_places[all_places['city'] == self.user_city]
         
         # Get places within city boundaries using geo service
-        boundary_places = self.geo_service.find_cities_in_boundaries(self.user_city, all_places)
-        
+        is_boundaries_found, places_found_based_on_boundaries = self.geo_service.find_cities_in_boundaries(places_by_user_city)
+        places_found_based_on_boundaries = places_found_based_on_boundaries.drop_duplicates()
+        if is_boundaries_found:
+            bplaces =[]
+            for _, bplace in places_found_based_on_boundaries.iterrows():
+                p = all_places[all_places['city'] == bplace['properties.name']].to_dict()
+                bplaces.append(p)
+            bplacesDF = pd.DataFrame(bplaces)
+            places_by_user_city = pd.concat([places_by_user_city,bplacesDF])
+            
+
         # Filter by user mood
-        mood_filtered_places = boundary_places[boundary_places['label'] == self.user_mode]
-        
+        mood_filtered_places = places_by_user_city[places_by_user_city['label'] == self.user_mode]
+        self.filtered_places = mood_filtered_places
         self.places_dictionary = mood_filtered_places.to_dict()
         
         # Get city picker info
         city_picker_data = self.datasets.get_city_picker()
-        city_info = city_picker_data[city_picker_data['city'] == self.user_city]
+        city_pickers = []
+        for _, row in mood_filtered_places.iterrows():
+            city_pickers.append(city_picker_data[city_picker_data['city'] == row['city']].to_dict())
+        city_info = pd.DataFrame(city_pickers)
         self.city_picker_dictionary = city_info.to_dict() if not city_info.empty else {}
         
         return self
 
-    def get_posts_for_boundary_cities(self):
-        """Get posts for all cities within the boundary"""
-        all_places = self.datasets.get_places()
-        boundary_places = self.geo_service.find_cities_in_boundaries(self.user_city, all_places)
-        
-        # Get unique cities from boundary places
-        boundary_cities = boundary_places['city'].unique().tolist()
-        
+    def get_posts_for_user_city_and_boundaries(self):
         # Get posts for all these cities
         all_posts = self.datasets.get_posts()
-        boundary_posts = all_posts[all_posts['city'].isin(boundary_cities)]
+        filtered_posts = []
+        for _, row in self.filtered_places.iterrows():
+            city_posts = all_posts[all_posts['city'] == row['city']]
+            filtered_posts.append(city_posts.to_dict())
+        self.filtered_posts = pd.DataFrame(filtered_posts)
         
-        self.posts_dictionary = boundary_posts.to_dict()
+        self.posts_dictionary = self.filtered_posts.to_dict()
         return self
 
     def compile_prompt(self):
@@ -75,7 +88,7 @@ class RecommendationService:
         self.compiled_prompt = f"""
         You are DumplinAI, a helpful and creative assistant that recommends places based on user input.
         Here is the user's current city and state: {self.city_picker_dictionary}
-        Here is the user's city picker line: {self.city_picker_dictionary.get('cuisine_summary', {}).get(0, 'N/A') if self.city_picker_dictionary else 'N/A'}
+        Here is the user's city picker line: {self.city_picker_dictionary}
         Here is the user's description of what they are looking for: {self.user_prompt}
         Here are the places that match the user's desired mode: {self.places_dictionary}
         Here are the social media posts from influencers in the area: {self.posts_dictionary}
@@ -111,6 +124,6 @@ class RecommendationService:
                    .set_user_prompt(user_prompt)
                    .set_user_mood()
                    .get_places_in_boundaries()
-                   .get_posts_for_boundary_cities()
+                   .get_posts_for_user_city_and_boundaries()
                    .compile_prompt()
                    .get_response())
